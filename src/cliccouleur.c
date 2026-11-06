@@ -270,20 +270,29 @@ static DWORD verifAuDemarrage(void *x) {
   return 0;
 }
 
+/* Ajoute un chemin entre apostrophes pour PowerShell (les ' sont doubles) */
+static WCHAR *cheminPS(WCHAR *p, const WCHAR *c) { *p++ = '\''; while (*c) { if (*c == '\'') *p++ = '\''; *p++ = *c++; } *p++ = '\''; *p = 0; return p; }
+
 static void mettreAJour(HWND hwnd) {
-  static WCHAR exe[600], neuf[620], vieux[620], url[300]; DWORD n;
+  static WCHAR exe[600], neuf[620], url[300], cmd[2600]; DWORD n; WCHAR *p;
   int v = versionDistante();
   if (v < 0) { MessageBoxW(hwnd, L"Impossible de vérifier les mises à jour (pas d'internet, ou aucune version publiée sur GitHub).", L"ClicCouleur", 0x30); return; }
   if (v <= VERSION) { MessageBoxW(hwnd, L"Tu as déjà la dernière version.", L"ClicCouleur", 0x40); return; }
   n = GetModuleFileNameW(0, exe, 520); if (!n || n >= 520) return;
-  ajoute(ajoute(neuf, exe), L".new"); ajoute(ajoute(vieux, exe), L".old");
+  if (!GetTempPathW(500, neuf)) return; p = neuf; while (*p) p++; ajoute(p, L"ClicCouleur_nouveau.exe");
   ajoute(ajoute(url, URL_DEPOT), L"ClicCouleur.exe");
   DeleteFileW(neuf);
   if (URLDownloadToFileW(0, url, neuf, 0, 0) != 0) { MessageBoxW(hwnd, L"Le téléchargement a échoué.", L"ClicCouleur", 0x10); return; }
-  DeleteFileW(vieux);
-  if (!MoveFileExW(exe, vieux, 1)) { DeleteFileW(neuf); MessageBoxW(hwnd, L"Impossible de remplacer le programme.", L"ClicCouleur", 0x10); return; }
-  if (!MoveFileExW(neuf, exe, 1)) { MoveFileExW(vieux, exe, 1); MessageBoxW(hwnd, L"Impossible de remplacer le programme.", L"ClicCouleur", 0x10); return; }
-  ShellExecuteW(0, L"open", exe, 0, 0, 1);   /* la nouvelle version ferme celle-ci en demarrant */
+  /* PowerShell attend que ce programme soit ferme, remplace le fichier, puis relance la nouvelle version */
+  p = ajoute(cmd, L"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Wait-Process -Id ");
+  p = chiffres(p, (int)GetCurrentProcessId());
+  p = ajoute(p, L" -ErrorAction SilentlyContinue; for($i=0;$i -lt 30;$i++){try{Copy-Item -LiteralPath ");
+  p = cheminPS(p, neuf); p = ajoute(p, L" -Destination "); p = cheminPS(p, exe);
+  p = ajoute(p, L" -Force -ErrorAction Stop; break}catch{Start-Sleep -Milliseconds 500}}; Start-Process -FilePath ");
+  p = cheminPS(p, exe); p = ajoute(p, L"\"");
+  if ((long long)ShellExecuteW(0, L"open", L"powershell.exe", cmd, 0, 0) <= 32) {
+    MessageBoxW(hwnd, L"Impossible de lancer la mise à jour.", L"ClicCouleur", 0x10); return; }
+  DestroyWindow(hwnd);   /* se ferme pour liberer le fichier */
 }
 
 /* Ajoute (ou met a jour) le lancement automatique avec Windows, demarre en reduit */
