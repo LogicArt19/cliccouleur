@@ -148,15 +148,20 @@ static LRESULT procZone(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 /* Jeux en ligne : aucun clic quand l'un d'eux est au premier plan */
-static const char *jeux[] = { "valorant", "cs2.exe", "csgo.exe", "fivem", "gta5", "gtav", "r5apex",
-  "fortnite", "overwatch", "tslgame", "cod.exe", "rainbowsix", "rustclient", "deadlock", "marvel",
-  "escapefromtarkov", "bf20", "bf6", "thefinals", "discovery", "league of legends", 0 };
+/* Noms exacts des executables (un nom finissant par '_' = prefixe) */
+static const char *jeux[] = { "valorant-win64-shipping.exe", "valorant.exe", "cs2.exe", "csgo.exe",
+  "fivem.exe", "fivem_", "gta5.exe", "gta5_enhanced.exe", "r5apex.exe", "r5apex_dx12.exe",
+  "fortniteclient-win64-shipping.exe", "overwatch.exe", "tslgame.exe", "cod.exe", "rainbowsix.exe",
+  "rainbowsix_vulkan.exe", "rustclient.exe", "deadlock.exe", "marvel-win64-shipping.exe",
+  "escapefromtarkov.exe", "bf6.exe", "bf2042.exe", "discovery.exe", "league of legends.exe", 0 };
 
 static WCHAR nomPremierPlan[64];
 static void ajouteNom(const WCHAR *s) { int i = 0; while (s[i] && i < 63) { nomPremierPlan[i] = s[i]; i++; } nomPremierPlan[i] = 0; }
 static WCHAR basse(WCHAR c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
-static int commencePar(const WCHAR *s, const char *p) {
-  while (*p) { if (basse(*s) != (WCHAR)*p) return 0; s++; p++; } return 1; }
+static int correspond(const WCHAR *s, const char *p) {
+  while (*p) { if (p[0] == '_' && !p[1]) return basse(*s) == '_';   /* prefixe */
+    if (basse(*s) != (WCHAR)*p) return 0; s++; p++; }
+  return *s == 0; }
 
 static DWORD pixelActuel = 0; static int surActuel = 0;
 static int jeuAuPremierPlan(void) {
@@ -169,7 +174,7 @@ static int jeuAuPremierPlan(void) {
   BOOL ok = QueryFullProcessImageNameW(h, 0, chemin, &n); CloseHandle(h); if (!ok) return 0;
   nom = chemin; for (i = 0; chemin[i]; i++) if (chemin[i] == '\\') nom = chemin + i + 1;
   ajouteNom(nom);
-  for (i = 0; jeux[i]; i++) if (commencePar(nom, jeux[i])) return 1;
+  for (i = 0; jeux[i]; i++) if (correspond(nom, jeux[i])) return 1;
   return 0;
 }
 
