@@ -62,6 +62,7 @@ IMP BOOL SetWindowTextW(HWND, LPCWSTR); IMP BOOL SetLayeredWindowAttributes(HWND
 IMP BOOL IsIconic(HWND); IMP HWND WindowFromPoint(POINT);
 /* demarrage */
 IMP DWORD GetModuleFileNameW(HINSTANCE, WCHAR *, DWORD); IMP WCHAR *GetCommandLineW(void);
+IMP BOOL OpenProcessToken(HANDLE, DWORD, HANDLE *); IMP BOOL GetTokenInformation(HANDLE, int, void *, DWORD, DWORD *);
 IMP LONG RegSetKeyValueW(HANDLE, LPCWSTR, LPCWSTR, DWORD, const void *, DWORD);
 
 void *memset(void *d, int c, unsigned long long n) { BYTE *p = d; while (n--) *p++ = (BYTE)c; return d; }
@@ -77,7 +78,7 @@ void *memset(void *d, int c, unsigned long long n) { BYTE *p = d; while (n--) *p
 #define DELAI_CLIC  300   /* ms minimum entre deux clics */
 
 static HDC ecran; static DWORD couleur = 0xFFFFFFFF; static int actif = 0, dejaSur = 0, bloque = 0;
-static DWORD dernierClic = 0; static HWND fenetre, voile, mini, avantSelection; static int touchesOk = 1; static int versionDispo = 0; static int nbClics = 0; static int enSelection = 0;
+static DWORD dernierClic = 0; static HWND fenetre, voile, mini, avantSelection; static int touchesOk = 1; static int versionDispo = 0; static int nbClics = 0; static int cibleAdmin = 0, moiAdmin = 0; static int enSelection = 0;
 
 static void rafraichir(void) { InvalidateRect(fenetre, 0, 1); if (mini) InvalidateRect(mini, 0, 1); }
 
@@ -167,6 +168,13 @@ static int correspond(const WCHAR *s, const char *p) {
     if (basse(*s) != (WCHAR)*p) return 0; s++; p++; }
   return *s == 0; }
 
+/* 1 si le processus tourne en administrateur, 2 si on ne peut pas savoir (souvent = administrateur) */
+static int estAdmin(HANDLE proc) {
+  HANDLE t; DWORD e = 0, n = 0;
+  if (!OpenProcessToken(proc, 8 /* TOKEN_QUERY */, &t)) return 2;
+  BOOL ok = GetTokenInformation(t, 20 /* TokenElevation */, &e, sizeof e, &n); CloseHandle(t);
+  return ok ? (e != 0) : 2;
+}
 static DWORD pixelActuel = 0; static int surActuel = 0;
 static int jeuAuPremierPlan(void) {
   DWORD pid = 0; WCHAR chemin[520]; DWORD n = 520; const WCHAR *nom; int i;
@@ -174,7 +182,9 @@ static int jeuAuPremierPlan(void) {
   GetWindowThreadProcessId(w, &pid);
   nomPremierPlan[0] = 0;
   if (pid == GetCurrentProcessId()) { ajouteNom(L"ClicCouleur"); return 0; }          /* ne clique pas sur sa propre fenetre */
-  HANDLE h = OpenProcess(0x1000, 0, pid); if (!h) return 0;
+  cibleAdmin = 0;
+  HANDLE h = OpenProcess(0x1000, 0, pid); if (!h) { cibleAdmin = !moiAdmin; return 0; }
+  cibleAdmin = !moiAdmin && estAdmin(h) != 0;
   BOOL ok = QueryFullProcessImageNameW(h, 0, chemin, &n); CloseHandle(h); if (!ok) return 0;
   nom = chemin; for (i = 0; chemin[i]; i++) if (chemin[i] == '\\') nom = chemin + i + 1;
   ajouteNom(nom);
@@ -189,7 +199,8 @@ static int proche(DWORD a, DWORD b) {
 static void clic(void) {
   INPUT in[2]; memset(in, 0, sizeof in);
   in[0].mi.dwFlags = 0x2; in[1].mi.dwFlags = 0x4;   /* gauche bas / haut */
-  SendInput(2, in, sizeof(INPUT));
+  SendInput(1, &in[0], sizeof(INPUT)); Sleep(40);      /* certains logiciels ignorent un clic trop rapide */
+  SendInput(1, &in[1], sizeof(INPUT));
 }
 
 static WCHAR *ajoute(WCHAR *d, const WCHAR *s) { while (*s) *d++ = *s++; *d = 0; return d; }
@@ -213,10 +224,11 @@ static void dessine(HWND hwnd) {
     p = ajoute(p, L"\nSous le curseur : "); p = hexa(p, pixelActuel);
     p = ajoute(p, surActuel ? L"  (correspond)" : L"  (ne correspond pas)");
     p = ajoute(p, L"\nClics faits : "); p = chiffres(p, nbClics);
+    if (cibleAdmin) p = ajoute(p, L"\n!! Ton logiciel est en administrateur : Windows bloque les clics.\n   Ferme ClicCouleur et relance-le en administrateur (clic droit).");
     p = ajoute(p, L"\nAppli au premier plan : "); p = ajoute(p, nomPremierPlan[0] ? nomPremierPlan : L"?");
     if (bloque) p = ajoute(p, L"\nEN PAUSE : jeu en ligne au premier plan");
   }
-  RECT r = { 12, 10, 470, 230 }; DrawTextW(dc, t, -1, &r, 0x10);
+  RECT r = { 12, 10, 470, 270 }; DrawTextW(dc, t, -1, &r, 0x10);
   if (couleur != 0xFFFFFFFF) { RECT c = { 300, 72, 340, 92 }; HBRUSH b = CreateSolidBrush(couleur);
     FillRect(dc, &c, b); DeleteObject(b); }
   EndPaint(hwnd, &ps);
@@ -350,7 +362,7 @@ static LRESULT procMini(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 void demarrer(void) {
-  SetProcessDPIAware(); ajouterDemarrage();
+  SetProcessDPIAware(); ajouterDemarrage(); moiAdmin = estAdmin((HANDLE)-1) == 1;
   for (int i = 0; i < 5; i++) { HWND ancien = FindWindowW(L"ClicCouleur", 0); if (!ancien) break;
     SendMessageW(ancien, 0x10, 0, 0); Sleep(200); }   /* ferme une ancienne copie qui garderait les touches */ ecran = GetDC(0);
   HINSTANCE hi = GetModuleHandleW(0); WNDCLASSW wc; memset(&wc, 0, sizeof wc);
@@ -360,11 +372,11 @@ void demarrer(void) {
   wc.hbrBackground = 0; RegisterClassW(&wc);
   wc.lpfnWndProc = procMini; wc.lpszClassName = L"ClicCouleurMini"; wc.hCursor = LoadCursorW(0, (LPCWSTR)32512); RegisterClassW(&wc);
   HWND hwnd = fenetre = CreateWindowExW(0x8, L"ClicCouleur", L"ClicCouleur", 0x00CA0000,
-    (int)0x80000000, (int)0x80000000, 480, 330, 0, 0, hi, 0);
+    (int)0x80000000, (int)0x80000000, 480, 370, 0, 0, hi, 0);
   touchesOk = RegisterHotKey(hwnd, 1, 0x4000, 0x77) & RegisterHotKey(hwnd, 2, 0x4000, 0x78) & RegisterHotKey(hwnd, 3, 0x4000, 0x79);
-  CreateWindowExW(0, L"BUTTON", L"Choisir la couleur (F8)", 0x50000000, 12, 240, 150, 32, hwnd, (HMENU)101, hi, 0);
-  CreateWindowExW(0, L"BUTTON", L"Activer / Désactiver (F9)", 0x50000000, 168, 240, 160, 32, hwnd, (HMENU)102, hi, 0);
-  CreateWindowExW(0, L"BUTTON", L"Mettre à jour", 0x50000000, 334, 240, 118, 32, hwnd, (HMENU)103, hi, 0);
+  CreateWindowExW(0, L"BUTTON", L"Choisir la couleur (F8)", 0x50000000, 12, 280, 150, 32, hwnd, (HMENU)101, hi, 0);
+  CreateWindowExW(0, L"BUTTON", L"Activer / Désactiver (F9)", 0x50000000, 168, 280, 160, 32, hwnd, (HMENU)102, hi, 0);
+  CreateWindowExW(0, L"BUTTON", L"Mettre à jour", 0x50000000, 334, 280, 118, 32, hwnd, (HMENU)103, hi, 0);
   { WCHAR titre[40], *p = ajoute(titre, L"ClicCouleur v"); chiffres(p, VERSION); SetWindowTextW(hwnd, titre); }
   CreateThread(0, 0, verifAuDemarrage, 0, 0, 0);
   /* mini barre : toujours au-dessus, sans prendre le focus, en haut a droite */

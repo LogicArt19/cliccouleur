@@ -1,3 +1,5 @@
 LIBRARY advapi32.dll
 EXPORTS
 RegSetKeyValueW
+OpenProcessToken
+GetTokenInformation
