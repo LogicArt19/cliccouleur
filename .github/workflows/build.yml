@@ -1,0 +1,28 @@
+name: Compiler et publier
+
+# A chaque modification poussee sur main : compile ClicCouleur.exe et publie une nouvelle version.
+# Le bouton « Mettre à jour » du logiciel telecharge automatiquement la derniere version publiee.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Installer clang / lld
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - name: Compiler
+        run: ./build.sh ${{ github.run_number }}
+      - name: Publier la version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" out/ClicCouleur.exe out/version.txt \
+            --title "ClicCouleur v${{ github.run_number }}" \
+            --notes "${{ github.event.head_commit.message || 'Nouvelle version' }}" --latest

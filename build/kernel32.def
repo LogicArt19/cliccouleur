@@ -1,0 +1,18 @@
+LIBRARY kernel32.dll
+EXPORTS
+GetModuleHandleW
+ExitProcess
+GetTickCount
+OpenProcess
+CloseHandle
+QueryFullProcessImageNameW
+GetCurrentProcessId
+GetModuleFileNameW
+GetCommandLineW
+Sleep
+GetTempPathW
+CreateFileW
+ReadFile
+MoveFileExW
+DeleteFileW
+CreateThread

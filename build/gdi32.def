@@ -1,0 +1,14 @@
+LIBRARY gdi32.dll
+EXPORTS
+GetPixel
+CreateSolidBrush
+DeleteObject
+SetBkMode
+CreateCompatibleDC
+CreateCompatibleBitmap
+CreateDIBSection
+SelectObject
+BitBlt
+DeleteDC
+SetTextColor
+SetBkColor
