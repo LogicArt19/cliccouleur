@@ -36,3 +36,5 @@ SendMessageW
 MessageBoxW
 PostMessageW
 SetWindowTextW
+SetLayeredWindowAttributes
+IsIconic

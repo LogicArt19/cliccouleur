@@ -58,7 +58,8 @@ IMP BOOL DeleteFileW(LPCWSTR); IMP HANDLE CreateThread(void *, unsigned long lon
 IMP long URLDownloadToFileW(void *, LPCWSTR, LPCWSTR, DWORD, void *);
 IMP HINSTANCE ShellExecuteW(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
 IMP int MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT); IMP BOOL PostMessageW(HWND, UINT, WPARAM, LPARAM);
-IMP BOOL SetWindowTextW(HWND, LPCWSTR);
+IMP BOOL SetWindowTextW(HWND, LPCWSTR); IMP BOOL SetLayeredWindowAttributes(HWND, DWORD, BYTE, DWORD);
+IMP BOOL IsIconic(HWND);
 /* demarrage */
 IMP DWORD GetModuleFileNameW(HINSTANCE, WCHAR *, DWORD); IMP WCHAR *GetCommandLineW(void);
 IMP LONG RegSetKeyValueW(HANDLE, LPCWSTR, LPCWSTR, DWORD, const void *, DWORD);
@@ -76,7 +77,9 @@ void *memset(void *d, int c, unsigned long long n) { BYTE *p = d; while (n--) *p
 #define DELAI_CLIC  300   /* ms minimum entre deux clics */
 
 static HDC ecran; static DWORD couleur = 0xFFFFFFFF; static int actif = 0, dejaSur = 0, bloque = 0;
-static DWORD dernierClic = 0; static HWND fenetre, voile; static int touchesOk = 1; static int versionDispo = 0; static int enSelection = 0;
+static DWORD dernierClic = 0; static HWND fenetre, voile, mini, avantSelection; static int touchesOk = 1; static int versionDispo = 0; static int enSelection = 0;
+
+static void rafraichir(void) { InvalidateRect(fenetre, 0, 1); if (mini) InvalidateRect(mini, 0, 1); }
 
 /* ---- Selection d'une zone a l'ecran, facon capture d'ecran ---- */
 static int vx, vy, vw, vh, glisse = 0; static POINT p0, p1;
@@ -105,7 +108,8 @@ static void fermerSelection(void) {
   if (dcCapture) { SelectObject(dcCapture, ancienCapture); DeleteObject(bmCapture); DeleteDC(dcCapture); dcCapture = 0; }
   if (dcTampon) { SelectObject(dcTampon, ancienTampon); DeleteObject(bmTampon); DeleteDC(dcTampon); dcTampon = 0; }
   enSelection = 0; dejaSur = 1; /* pas de clic immediat */
-  InvalidateRect(fenetre, 0, 1);
+  rafraichir();
+  if (avantSelection) { SetForegroundWindow(avantSelection); avantSelection = 0; }  /* rend la main a ton logiciel */
 }
 
 static void ouvrirSelection(void) {
@@ -118,7 +122,7 @@ static void ouvrirSelection(void) {
   BitBlt(dcCapture, 0, 0, vw, vh, ecran, vx, vy, 0x00CC0020);
   dcTampon = CreateCompatibleDC(ecran); bmTampon = CreateCompatibleBitmap(ecran, vw, vh);
   ancienTampon = SelectObject(dcTampon, bmTampon);
-  enSelection = 1; glisse = 0;
+  enSelection = 1; glisse = 0; avantSelection = GetForegroundWindow();
   voile = CreateWindowExW(0x88, L"ClicCouleurZone", L"", 0x80000000, vx, vy, vw, vh, 0, 0, GetModuleHandleW(0), 0);
   ShowWindow(voile, 5); SetForegroundWindow(voile);
 }
@@ -225,22 +229,23 @@ static LRESULT proc(HWND hwnd, UINT m, WPARAM w, LPARAM l) {
       actif = !actif; dejaSur = 0;
       if (actif) SetTimer(hwnd, 1, INTERVALLE, 0); else KillTimer(hwnd, 1); }
     else if (w == 3) { fermerSelection(); DestroyWindow(hwnd); }
-    InvalidateRect(hwnd, 0, 1); return 0;
+    rafraichir(); return 0;
   case 0x113: { /* WM_TIMER */
     if (enSelection) return 0;
-    int b = jeuAuPremierPlan(); if (b != bloque) { bloque = b; InvalidateRect(hwnd, 0, 1); }
+    int b = jeuAuPremierPlan(); if (b != bloque) { bloque = b; rafraichir(); }
     POINT pt; GetCursorPos(&pt); int sur = proche(GetPixel(ecran, pt.x, pt.y), couleur);
     RECT fr; GetWindowRect(hwnd, &fr);
-    int surFenetre = pt.x >= fr.left && pt.x < fr.right && pt.y >= fr.top && pt.y < fr.bottom;
+    int surFenetre = !IsIconic(hwnd) && pt.x >= fr.left && pt.x < fr.right && pt.y >= fr.top && pt.y < fr.bottom;
+    if (mini) { GetWindowRect(mini, &fr); if (pt.x >= fr.left && pt.x < fr.right && pt.y >= fr.top && pt.y < fr.bottom) surFenetre = 1; }
     if (!b && !surFenetre && sur && !dejaSur && GetTickCount() - dernierClic > DELAI_CLIC) { clic(); dernierClic = GetTickCount(); }
     { static int n = 0; DWORD px = GetPixel(ecran, pt.x, pt.y);
-      if (++n >= 5 || sur != surActuel) { n = 0; pixelActuel = px; surActuel = sur; InvalidateRect(hwnd, 0, 1); } }
+      if (++n >= 5 || sur != surActuel) { n = 0; pixelActuel = px; surActuel = sur; rafraichir(); } }
     dejaSur = sur; return 0; }
   case 0x111: /* boutons */
     if ((w & 0xFFFF) >= 101 && (w & 0xFFFF) <= 102) return proc(hwnd, 0x312, (w & 0xFFFF) - 100, 0);
     if ((w & 0xFFFF) == 103) { mettreAJour(hwnd); return 0; }
     break;
-  case 0x8000: InvalidateRect(hwnd, 0, 1); return 0;
+  case 0x8000: rafraichir(); return 0;
   case 0xF: dessine(hwnd); return 0;
   case 0x2: PostQuitMessage(0); return 0;
   }
@@ -310,6 +315,38 @@ static int lanceEnReduit(void) {
   return 0;
 }
 
+/* ---- Mini barre toujours visible, qui ne prend pas le focus de ton logiciel ---- */
+#define MINI_L 300
+#define MINI_H 40
+static void bouton(HDC dc, int x0, int x1, LPCWSTR t) {
+  RECT r = { x0, 6, x1, MINI_H - 6 }; HBRUSH b = CreateSolidBrush(0x505050); FillRect(dc, &r, b); DeleteObject(b);
+  DrawTextW(dc, t, -1, &r, 0x1 | 0x4 | 0x20); }
+static LRESULT procMini(HWND h, UINT m, WPARAM w, LPARAM l) {
+  int x = (short)(l & 0xFFFF);
+  switch (m) {
+  case 0xF: { PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); RECT r = { 0, 0, MINI_L, MINI_H };
+    HBRUSH fond = CreateSolidBrush(0x202020); FillRect(dc, &r, fond); DeleteObject(fond);
+    SetBkMode(dc, 1); SetTextColor(dc, 0xFFFFFF);
+    RECT c = { 8, 10, 28, 30 };
+    if (couleur != 0xFFFFFFFF) { HBRUSH b = CreateSolidBrush(couleur); FillRect(dc, &c, b); DeleteObject(b); }
+    else { HBRUSH b = CreateSolidBrush(0x808080); FrameRect(dc, &c, b); DeleteObject(b); }
+    RECT t = { 34, 0, 112, MINI_H };
+    if (actif && bloque) { SetTextColor(dc, 0x00A5FF); DrawTextW(dc, L"PAUSE", -1, &t, 0x4 | 0x20); }
+    else if (actif) { SetTextColor(dc, 0x50D050); DrawTextW(dc, L"ACTIVÉ", -1, &t, 0x4 | 0x20); }
+    else { SetTextColor(dc, 0xB0B0B0); DrawTextW(dc, L"désactivé", -1, &t, 0x4 | 0x20); }
+    SetTextColor(dc, 0xFFFFFF);
+    bouton(dc, 116, 196, L"Couleur"); bouton(dc, 202, 292, actif ? L"Désactiver" : L"Activer");
+    EndPaint(h, &ps); return 0; }
+  case 0x21: return 3;  /* WM_MOUSEACTIVATE -> MA_NOACTIVATE : ton logiciel garde le focus */
+  case 0x201:
+    if (x >= 116 && x < 196) { proc(fenetre, 0x312, 1, 0); return 0; }
+    if (x >= 202 && x < 292) { proc(fenetre, 0x312, 2, 0); return 0; }
+    ReleaseCapture(); SendMessageW(h, 0xA1, 2, 0); return 0;   /* deplacer la barre en la faisant glisser */
+  case 0x204: ShowWindow(fenetre, 9); SetForegroundWindow(fenetre); return 0;  /* clic droit : fenetre complete */
+  }
+  return DefWindowProcW(h, m, w, l);
+}
+
 void demarrer(void) {
   SetProcessDPIAware(); ajouterDemarrage();
   for (int i = 0; i < 5; i++) { HWND ancien = FindWindowW(L"ClicCouleur", 0); if (!ancien) break;
@@ -319,6 +356,7 @@ void demarrer(void) {
   wc.hbrBackground = (HBRUSH)(5 + 1); wc.lpszClassName = L"ClicCouleur"; RegisterClassW(&wc);
   wc.lpfnWndProc = procZone; wc.lpszClassName = L"ClicCouleurZone"; wc.hCursor = LoadCursorW(0, (LPCWSTR)32515);
   wc.hbrBackground = 0; RegisterClassW(&wc);
+  wc.lpfnWndProc = procMini; wc.lpszClassName = L"ClicCouleurMini"; wc.hCursor = LoadCursorW(0, (LPCWSTR)32512); RegisterClassW(&wc);
   HWND hwnd = fenetre = CreateWindowExW(0x8, L"ClicCouleur", L"ClicCouleur", 0x00CA0000,
     (int)0x80000000, (int)0x80000000, 480, 330, 0, 0, hi, 0);
   touchesOk = RegisterHotKey(hwnd, 1, 0x4000, 0x77) & RegisterHotKey(hwnd, 2, 0x4000, 0x78) & RegisterHotKey(hwnd, 3, 0x4000, 0x79);
@@ -327,6 +365,10 @@ void demarrer(void) {
   CreateWindowExW(0, L"BUTTON", L"Mettre à jour", 0x50000000, 334, 240, 118, 32, hwnd, (HMENU)103, hi, 0);
   { WCHAR titre[40], *p = ajoute(titre, L"ClicCouleur v"); chiffres(p, VERSION); SetWindowTextW(hwnd, titre); }
   CreateThread(0, 0, verifAuDemarrage, 0, 0, 0);
+  /* mini barre : toujours au-dessus, sans prendre le focus, en haut a droite */
+  mini = CreateWindowExW(0x08000000 | 0x80000 | 0x80 | 0x8, L"ClicCouleurMini", L"", 0x80000000,
+    GetSystemMetrics(0) - MINI_L - 20, 20, MINI_L, MINI_H, 0, 0, hi, 0);
+  SetLayeredWindowAttributes(mini, 0, 230, 2); ShowWindow(mini, 4);
   ShowWindow(hwnd, lanceEnReduit() ? 7 : 5);  /* 7 = reduit sans voler le focus */
   MSG msg; while (GetMessageW(&msg, 0, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessageW(&msg); }
   ExitProcess(0);
