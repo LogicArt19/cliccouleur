@@ -38,3 +38,4 @@ PostMessageW
 SetWindowTextW
 SetLayeredWindowAttributes
 IsIconic
+WindowFromPoint

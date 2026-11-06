@@ -59,7 +59,7 @@ IMP long URLDownloadToFileW(void *, LPCWSTR, LPCWSTR, DWORD, void *);
 IMP HINSTANCE ShellExecuteW(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, int);
 IMP int MessageBoxW(HWND, LPCWSTR, LPCWSTR, UINT); IMP BOOL PostMessageW(HWND, UINT, WPARAM, LPARAM);
 IMP BOOL SetWindowTextW(HWND, LPCWSTR); IMP BOOL SetLayeredWindowAttributes(HWND, DWORD, BYTE, DWORD);
-IMP BOOL IsIconic(HWND);
+IMP BOOL IsIconic(HWND); IMP HWND WindowFromPoint(POINT);
 /* demarrage */
 IMP DWORD GetModuleFileNameW(HINSTANCE, WCHAR *, DWORD); IMP WCHAR *GetCommandLineW(void);
 IMP LONG RegSetKeyValueW(HANDLE, LPCWSTR, LPCWSTR, DWORD, const void *, DWORD);
@@ -77,7 +77,7 @@ void *memset(void *d, int c, unsigned long long n) { BYTE *p = d; while (n--) *p
 #define DELAI_CLIC  300   /* ms minimum entre deux clics */
 
 static HDC ecran; static DWORD couleur = 0xFFFFFFFF; static int actif = 0, dejaSur = 0, bloque = 0;
-static DWORD dernierClic = 0; static HWND fenetre, voile, mini, avantSelection; static int touchesOk = 1; static int versionDispo = 0; static int enSelection = 0;
+static DWORD dernierClic = 0; static HWND fenetre, voile, mini, avantSelection; static int touchesOk = 1; static int versionDispo = 0; static int nbClics = 0; static int enSelection = 0;
 
 static void rafraichir(void) { InvalidateRect(fenetre, 0, 1); if (mini) InvalidateRect(mini, 0, 1); }
 
@@ -197,6 +197,7 @@ static WCHAR *ajoute(WCHAR *d, const WCHAR *s) { while (*s) *d++ = *s++; *d = 0;
 static WCHAR *hexa(WCHAR *p, DWORD c) { static const WCHAR h[] = L"0123456789ABCDEF";
   DWORD v[3] = { c & 255, (c >> 8) & 255, (c >> 16) & 255 }; *p++ = '#';
   for (int i = 0; i < 3; i++) { *p++ = h[v[i] >> 4]; *p++ = h[v[i] & 15]; } *p = 0; return p; }
+static WCHAR *chiffres(WCHAR *p, int n);
 static void dessine(HWND hwnd) {
   PAINTSTRUCT ps; HDC dc = BeginPaint(hwnd, &ps); WCHAR t[512], *p = t;
   static const WCHAR hex[] = L"0123456789ABCDEF";
@@ -211,6 +212,7 @@ static void dessine(HWND hwnd) {
   if (actif) {
     p = ajoute(p, L"\nSous le curseur : "); p = hexa(p, pixelActuel);
     p = ajoute(p, surActuel ? L"  (correspond)" : L"  (ne correspond pas)");
+    p = ajoute(p, L"\nClics faits : "); p = chiffres(p, nbClics);
     p = ajoute(p, L"\nAppli au premier plan : "); p = ajoute(p, nomPremierPlan[0] ? nomPremierPlan : L"?");
     if (bloque) p = ajoute(p, L"\nEN PAUSE : jeu en ligne au premier plan");
   }
@@ -234,10 +236,10 @@ static LRESULT proc(HWND hwnd, UINT m, WPARAM w, LPARAM l) {
     if (enSelection) return 0;
     int b = jeuAuPremierPlan(); if (b != bloque) { bloque = b; rafraichir(); }
     POINT pt; GetCursorPos(&pt); int sur = proche(GetPixel(ecran, pt.x, pt.y), couleur);
-    RECT fr; GetWindowRect(hwnd, &fr);
-    int surFenetre = !IsIconic(hwnd) && pt.x >= fr.left && pt.x < fr.right && pt.y >= fr.top && pt.y < fr.bottom;
-    if (mini) { GetWindowRect(mini, &fr); if (pt.x >= fr.left && pt.x < fr.right && pt.y >= fr.top && pt.y < fr.bottom) surFenetre = 1; }
-    if (!b && !surFenetre && sur && !dejaSur && GetTickCount() - dernierClic > DELAI_CLIC) { clic(); dernierClic = GetTickCount(); }
+    /* ne pas cliquer seulement si la fenetre VISIBLE sous le curseur est a ClicCouleur */
+    DWORD pidSous = 0; HWND sous = WindowFromPoint(pt); if (sous) GetWindowThreadProcessId(sous, &pidSous);
+    int surFenetre = sous && pidSous == GetCurrentProcessId();
+    if (!b && !surFenetre && sur && !dejaSur && GetTickCount() - dernierClic > DELAI_CLIC) { clic(); dernierClic = GetTickCount(); nbClics++; rafraichir(); }
     { static int n = 0; DWORD px = GetPixel(ecran, pt.x, pt.y);
       if (++n >= 5 || sur != surActuel) { n = 0; pixelActuel = px; surActuel = sur; rafraichir(); } }
     dejaSur = sur; return 0; }
